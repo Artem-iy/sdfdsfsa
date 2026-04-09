@@ -1,74 +1,132 @@
+Короткий ответ: **да, можно без ML** — и для этого кейса это даже нормальный подход.
+
+---
+
+# ✅ Вариант 1: без ML (rule-based, достаточно для кейса)
+
+У тебя уже есть главное — **словарь микрокатегорий с `keyPhrases`** (см. ).
+
+👉 Значит можно сделать так:
+
+## 🔧 Логика
+
+1. Берёшь `description`
+2. Приводишь к нижнему регистру
+3. Для каждой микрокатегории:
+
+   * проверяешь, есть ли совпадения по `keyPhrases`
+4. Если есть → считаешь категорию найденной
+
+---
+
+## 💻 Пример кода
+
 ```python
-import logging
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List
+def detect_microcategories(description: str, categories: list) -> list:
+    description = description.lower()
+    detected = []
 
-from services.yandex_generator import YandexGPTLiteGenerator
+    for mc in categories:
+        for phrase in mc["keyPhrases"]:
+            if phrase.lower() in description:
+                detected.append({
+                    "mcId": mc["mcId"],
+                    "mcTitle": mc["mcTitle"]
+                })
+                break
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = FastAPI(
-    title="Avito Draft Generator API",
-    description="Генерация черновиков объявлений с разбиением по микрокатегориям",
-    version="1.0"
-)
-
-
-class DraftRequest(BaseModel):
-    description: str
-    should_split: bool
-    probability: float
-
-
-class Draft(BaseModel):
-    mcId: int
-    mcTitle: str
-    text: str
-
-
-class DraftResponse(BaseModel):
-    shouldSplit: bool
-    drafts: List[Draft]
-
-
-try:
-    generator = YandexGPTLiteGenerator()
-except Exception as e:
-    logger.error(f"Ошибка инициализации генератора: {e}")
-    generator = None
-
-
-@app.post("/generate-draft", response_model=DraftResponse)
-def generate_draft(request: DraftRequest):
-    if generator is None:
-        raise HTTPException(status_code=500, detail="Генератор не инициализирован")
-
-    try:
-        result = generator.generate(
-            description=request.description,
-            should_split=request.should_split,
-            probability=request.probability
-        )
-
-        if not isinstance(result, dict):
-            raise ValueError("Generator returned non-dict")
-
-        if "shouldSplit" not in result or "drafts" not in result:
-            raise ValueError("Invalid response structure")
-
-        if not isinstance(result["drafts"], list):
-            raise ValueError("drafts must be a list")
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Ошибка генерации: {str(e)}")
-        raise HTTPException(status_code=500, detail="Ошибка генерации черновика")
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+    return detected
 ```
+
+---
+
+## ➕ Как определить `shouldSplit`
+
+```python
+should_split = len(detected) > 1
+```
+
+---
+
+## 📌 Плюсы
+
+* просто
+* быстро
+* объяснимо
+* хорошо работает на кейсах
+
+## 📌 Минусы
+
+* не понимает контекст
+  (например: "входит в ремонт" vs "делаем отдельно")
+
+---
+
+# ⚖️ Вариант 2: гибрид (лучший для тебя)
+
+👉 Делай так:
+
+1. **ты сам находишь категории (rule-based)**
+2. **LLM только пишет тексты**
+
+---
+
+## 🔥 Архитектура
+
+```text
+description
+   ↓
+detect_microcategories()   ← твой код
+   ↓
+[mc1, mc2, mc3]
+   ↓
+for each mc:
+    generate draft через LLM
+```
+
+---
+
+## 💡 Почему это лучше
+
+* ты контролируешь `mcId` (важно для кейса)
+* не зависишь от "галлюцинаций" модели
+* стабильнее результат
+
+---
+
+# 🤖 Вариант 3: чистый ML / LLM
+
+Можно:
+
+```text
+"определи категории"
+```
+
+НО:
+
+* нестабильно
+* сложно валидировать
+* хуже для продакшена
+
+---
+
+# 🏆 Рекомендация (что делать тебе)
+
+Лучший вариант для кейса:
+
+### 👉 Используй гибрид
+
+* категории → сам (через словарь)
+* тексты → YandexGPT
+
+---
+
+# 🚀 Если хочешь следующий шаг
+
+Могу:
+
+* встроить `detect_microcategories()` прямо в твой код
+* сделать чтобы `generate()` создавал **draft на каждую категорию**
+* убрать зависимость от `should_split`
+
+Это уже будет решение уровня "почти максимум баллов".
